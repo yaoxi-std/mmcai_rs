@@ -49,40 +49,55 @@ struct AuthResponse {
   selected_profile: Profile,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenPayload<'a> {
+  access_token: &'a str,
+  client_token: &'a str,
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct Profile {
   pub id: String,
   pub name: String,
 }
 
 #[derive(Debug)]
-pub struct LoginResult {
-  pub prefetched_data: String,
+pub struct AuthResult {
   pub access_token: String,
   pub selected_profile: Profile,
+}
+
+fn build_http_client() -> Result<reqwest::blocking::Client> {
+  reqwest::blocking::Client::builder()
+    .redirect(reqwest::redirect::Policy::none())
+    .build()
+    .context("Failed to build HTTP client")
 }
 
 pub fn generate_client_token() -> String {
   Uuid::new_v4().to_string()
 }
 
-pub fn yggdrasil_login(
-  username: &str,
-  password: &str,
-  client_token: &str,
-  api_url: &str,
-) -> Result<LoginResult> {
-  let client = reqwest::blocking::Client::builder()
-    .redirect(reqwest::redirect::Policy::none())
-    .build()
-    .context("Failed to build HTTP client")?;
-
-  let prefetched_data_text = client
+/// Fetch and base64-encode the Yggdrasil server metadata.
+pub fn prefetch_server_data(api_url: &str) -> Result<String> {
+  let client = build_http_client()?;
+  let text = client
     .get(api_url)
     .send()
     .and_then(|r| r.text())
     .context("Cannot reach the authentication server")?;
-  let prefetched_data = BASE64_STANDARD.encode(prefetched_data_text);
+  Ok(BASE64_STANDARD.encode(text))
+}
+
+/// Full authentication with username + password.
+pub fn yggdrasil_authenticate(
+  username: &str,
+  password: &str,
+  client_token: &str,
+  api_url: &str,
+) -> Result<AuthResult> {
+  let client = build_http_client()?;
 
   let mut headers = header::HeaderMap::new();
   headers.insert("Content-Type", "application/json".parse().unwrap());
@@ -94,7 +109,7 @@ pub fn yggdrasil_login(
     ..AuthRequest::default()
   };
 
-  let auth_response: AuthResponse = client
+  let resp: AuthResponse = client
     .post(format!("{}/authserver/authenticate", api_url))
     .headers(headers)
     .json(&body)
@@ -102,9 +117,51 @@ pub fn yggdrasil_login(
     .and_then(|r| r.json())
     .context("Authentication failed: wrong username or password")?;
 
-  Ok(LoginResult {
-    prefetched_data,
-    access_token: auth_response.access_token,
-    selected_profile: auth_response.selected_profile,
+  Ok(AuthResult {
+    access_token: resp.access_token,
+    selected_profile: resp.selected_profile,
+  })
+}
+
+/// Check whether an existing access token is still valid (HTTP 204 = valid).
+pub fn yggdrasil_validate(access_token: &str, client_token: &str, api_url: &str) -> Result<bool> {
+  let client = build_http_client()?;
+  let payload = TokenPayload {
+    access_token,
+    client_token,
+  };
+
+  let status = client
+    .post(format!("{}/authserver/validate", api_url))
+    .json(&payload)
+    .send()
+    .context("Cannot reach the authentication server")?
+    .status();
+
+  Ok(status.is_success())
+}
+
+/// Refresh an expired access token. Returns a new access token + profile.
+pub fn yggdrasil_refresh(
+  access_token: &str,
+  client_token: &str,
+  api_url: &str,
+) -> Result<AuthResult> {
+  let client = build_http_client()?;
+  let payload = TokenPayload {
+    access_token,
+    client_token,
+  };
+
+  let resp: AuthResponse = client
+    .post(format!("{}/authserver/refresh", api_url))
+    .json(&payload)
+    .send()
+    .and_then(|r| r.json())
+    .context("Token refresh failed")?;
+
+  Ok(AuthResult {
+    access_token: resp.access_token,
+    selected_profile: resp.selected_profile,
   })
 }
