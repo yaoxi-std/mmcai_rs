@@ -1,6 +1,6 @@
 # mmcai_rs
 
-中文版请见[这里](https://github.com/CatMe0w/mmcai_rs/blob/master/README_zh.md)。
+中文版请见[这里](README_zh.md)。
 
 _Tee Hee._
 
@@ -8,24 +8,37 @@ Prism Launcher/MultiMC itself does not support authlib-injector (custom/homebrew
 
 This project is inspired by [mmcai.sh](https://github.com/baobao1270/mmcai.sh), but it only supports Linux and macOS. I want to make it work on Windows.
 
-At the very beginning, I was trying to make a simple PowerShell script to do the same thing. But after wasting many hours on Microsoft's pie in the sky, before my sanity completely drained away, I gave up and decided to join the RIIR army.
-
-Windows, macOS, Linux, all supported.
+Windows, macOS, Linux, all supported. No plaintext passwords. Sessions are cached. Microsoft accounts work as-is.
 
 ## How to use
 
-Download mmcai_rs from [here](https://github.com/CatMe0w/mmcai_rs/releases).
+1. Download mmcai_rs from [Releases](https://github.com/CatMe0w/mmcai_rs/releases) and authlib-injector from [here](https://github.com/yushijinhun/authlib-injector/releases).
 
-Then download authlib-injector from [here](https://github.com/yushijinhun/authlib-injector/releases).
+2. It is recommended to put both files under `~/.mmcai` (create the directory if needed):
 
-Put `authlib-injector-X.Y.Z.jar` and mmcai_rs in the same directory.
+   ```
+   ~/.mmcai/
+   ├── mmcai_rs          (or mmcai_rs.exe on Windows)
+   └── authlib-injector-X.Y.Z.jar
+   ```
 
-Open Prism Launcher/MultiMC, edit an instance, select "Settings" - "Custom commands" and fill in the "Wrapper command" with the absolute path to mmcai_rs. Then followed it by filling in the username, password, and Yggdrasil API address, separated by spaces.
+3. In Prism Launcher, create an **offline account** with the name `<username>@<server>`:
 
-Example:
-```
-C:\path\to\mmcai_rs-windows-x86_64.exe PlayerName hunter2 https://www.example.com/api/yggdrasil
-```
+   - `<username>` is your account name on the Yggdrasil server.
+   - `<server>` is the server domain or full API URL.
+   - Examples: `player@littleskin.cn`, `player@https://example.com/api/yggdrasil`
+
+   ![Edit offline username in Prism](assets/username.png)
+
+4. Edit an instance, go to **Settings > Custom commands**, and set the **Wrapper command** to the absolute path of mmcai_rs:
+
+   ```
+   /home/you/.mmcai/mmcai_rs
+   ```
+
+5. Launch the game. A system dialog will ask for your password on first login. The session is cached afterwards.
+
+> **Tip:** Microsoft accounts work without any extra setup. If the active account is a Microsoft account, mmcai_rs detects it automatically and passes through without injecting authlib-injector.
 
 ## License
 
