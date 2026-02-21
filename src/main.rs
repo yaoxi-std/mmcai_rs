@@ -82,69 +82,80 @@ fn main() -> Result<()> {
   let cli_args: Vec<String> = env::args().collect();
   let wrapper_args = args::parse_wrapper_args(&cli_args)?;
 
-  let authlib_injector_path = injector::find_authlib_injector(None)
-    .context("authlib-injector not found in the same directory as mmcai_rs")?;
-
-  eprintln!(
-    "[mmcai_rs] authlib-injector found at {:?}",
-    authlib_injector_path
-  );
-
   let mut minecraft_params = params::read_minecraft_params()?;
   let raw_username = params::extract_raw_username(&minecraft_params)?;
-  let mut identity = args::parse_user_identity(&raw_username)?;
-
-  eprintln!(
-    "[mmcai_rs] Resolving API URL for {}...",
-    identity.server_url
-  );
-
-  let resolved_url = auth::resolve_api_url(&identity.server_url)?;
-  if resolved_url != identity.server_url {
-    eprintln!(
-      "[mmcai_rs] ALI: {} -> {}",
-      identity.server_url, resolved_url
-    );
-    identity.server_url = resolved_url;
-  }
-
-  eprintln!(
-    "[mmcai_rs] Logging in as {} to {}",
-    identity.username, identity.server_url
-  );
-
-  let prefetched_data = auth::prefetch_server_data(&identity.server_url)?;
-  let (auth_result, _client_token) = resolve_auth(&identity)?;
-
-  eprintln!(
-    "[mmcai_rs] Successfully authenticated as {}",
-    auth_result.selected_profile.name
-  );
-
-  params::modify_minecraft_params(
-    &mut minecraft_params,
-    &auth_result.access_token,
-    &auth_result.selected_profile.id,
-    &auth_result.selected_profile.name,
-  )?;
-
-  let java_executable = env::var("INST_JAVA").context("INST_JAVA environment variable not set")?;
 
   let mut jvm_args = wrapper_args.jvm_args;
-  jvm_args.insert(
-    0,
-    format!(
-      "-javaagent:{}={}",
-      authlib_injector_path
-        .to_str()
-        .context("Invalid authlib-injector path")?,
-      identity.server_url
-    ),
-  );
-  jvm_args.insert(
-    1,
-    format!("-Dauthlibinjector.yggdrasil.prefetched={}", prefetched_data),
-  );
+
+  match args::parse_user_identity(&raw_username) {
+    Ok(mut identity) => {
+      let authlib_injector_path = injector::find_authlib_injector(None)
+        .context("authlib-injector not found in the same directory as mmcai_rs")?;
+
+      eprintln!(
+        "[mmcai_rs] authlib-injector found at {:?}",
+        authlib_injector_path
+      );
+
+      eprintln!(
+        "[mmcai_rs] Resolving API URL for {}...",
+        identity.server_url
+      );
+
+      let resolved_url = auth::resolve_api_url(&identity.server_url)?;
+      if resolved_url != identity.server_url {
+        eprintln!(
+          "[mmcai_rs] ALI: {} -> {}",
+          identity.server_url, resolved_url
+        );
+        identity.server_url = resolved_url;
+      }
+
+      eprintln!(
+        "[mmcai_rs] Logging in as {} to {}",
+        identity.username, identity.server_url
+      );
+
+      let prefetched_data = auth::prefetch_server_data(&identity.server_url)?;
+      let (auth_result, _client_token) = resolve_auth(&identity)?;
+
+      eprintln!(
+        "[mmcai_rs] Successfully authenticated as {}",
+        auth_result.selected_profile.name
+      );
+
+      params::modify_minecraft_params(
+        &mut minecraft_params,
+        &auth_result.access_token,
+        &auth_result.selected_profile.id,
+        &auth_result.selected_profile.name,
+      )?;
+
+      jvm_args.insert(
+        0,
+        format!(
+          "-javaagent:{}={}",
+          authlib_injector_path
+            .to_str()
+            .context("Invalid authlib-injector path")?,
+          identity.server_url
+        ),
+      );
+      jvm_args.insert(
+        1,
+        format!("-Dauthlibinjector.yggdrasil.prefetched={}", prefetched_data),
+      );
+    }
+    Err(_) => {
+      eprintln!(
+        "[mmcai_rs] '{}' is not in <user>@<server> format, \
+         bypassing authlib-injector (passthrough mode)",
+        raw_username
+      );
+    }
+  }
+
+  let java_executable = env::var("INST_JAVA").context("INST_JAVA environment variable not set")?;
 
   #[cfg(debug_assertions)]
   {
