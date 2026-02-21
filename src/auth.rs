@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use base64::prelude::*;
 use reqwest::header;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -164,4 +165,104 @@ pub fn yggdrasil_refresh(
     access_token: resp.access_token,
     selected_profile: resp.selected_profile,
   })
+}
+
+/// Resolve the ALI header value against the original URL.
+///
+/// If `ali_header` is `Some`, resolves it (possibly relative) against
+/// `original_url`. Returns the original URL unchanged if no ALI header
+/// is present or if it points to itself.
+fn resolve_ali(original_url: &str, ali_header: Option<&str>) -> String {
+  match ali_header {
+    Some(ali) => {
+      let resolved = Url::parse(original_url)
+        .ok()
+        .and_then(|base| base.join(ali).ok())
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| ali.to_string());
+      if resolved == original_url {
+        original_url.to_string()
+      } else {
+        resolved
+      }
+    }
+    None => original_url.to_string(),
+  }
+}
+
+/// Resolve the actual Yggdrasil API URL using the ALI protocol.
+///
+/// 1. If the URL lacks a scheme, `https://` has already been prepended
+///    by `parse_user_identity`.
+/// 2. Send a GET request to the URL (following HTTP redirects).
+/// 3. If the response contains `X-Authlib-Injector-API-Location`,
+///    that header value is the real API URL.
+/// 4. Otherwise the (possibly redirected) URL is the API URL.
+pub fn resolve_api_url(url: &str) -> Result<String> {
+  // Use a client that follows redirects (default behavior)
+  let client = reqwest::blocking::Client::builder()
+    .build()
+    .context("Failed to build HTTP client")?;
+
+  let response = client
+    .get(url)
+    .send()
+    .with_context(|| format!("Cannot reach server at {}", url))?;
+
+  let ali_value = response
+    .headers()
+    .get("x-authlib-injector-api-location")
+    .and_then(|v| v.to_str().ok());
+
+  Ok(resolve_ali(url, ali_value))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_resolve_ali_with_absolute_url() {
+    let result = resolve_ali(
+      "https://littleskin.cn",
+      Some("https://littleskin.cn/api/yggdrasil"),
+    );
+    assert_eq!(result, "https://littleskin.cn/api/yggdrasil");
+  }
+
+  #[test]
+  fn test_resolve_ali_with_relative_url() {
+    let result = resolve_ali("https://example.com", Some("/api/yggdrasil"));
+    assert_eq!(result, "https://example.com/api/yggdrasil");
+  }
+
+  #[test]
+  fn test_resolve_ali_self_referencing() {
+    let result = resolve_ali(
+      "https://example.com/api/yggdrasil",
+      Some("https://example.com/api/yggdrasil"),
+    );
+    assert_eq!(result, "https://example.com/api/yggdrasil");
+  }
+
+  #[test]
+  fn test_resolve_ali_none() {
+    let result = resolve_ali("https://example.com/api/yggdrasil", None);
+    assert_eq!(result, "https://example.com/api/yggdrasil");
+  }
+
+  #[test]
+  fn test_resolve_ali_cross_domain() {
+    let result = resolve_ali(
+      "https://littlesk.in",
+      Some("https://mcskin.littleservice.cn/api/yggdrasil"),
+    );
+    assert_eq!(result, "https://mcskin.littleservice.cn/api/yggdrasil");
+  }
+
+  #[test]
+  fn test_generate_client_token_format() {
+    let token = generate_client_token();
+    assert_eq!(token.len(), 36);
+  }
 }

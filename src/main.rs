@@ -92,7 +92,21 @@ fn main() -> Result<()> {
 
   let mut minecraft_params = params::read_minecraft_params()?;
   let raw_username = params::extract_raw_username(&minecraft_params)?;
-  let identity = args::parse_user_identity(&raw_username)?;
+  let mut identity = args::parse_user_identity(&raw_username)?;
+
+  eprintln!(
+    "[mmcai_rs] Resolving API URL for {}...",
+    identity.server_url
+  );
+
+  let resolved_url = auth::resolve_api_url(&identity.server_url)?;
+  if resolved_url != identity.server_url {
+    eprintln!(
+      "[mmcai_rs] ALI: {} -> {}",
+      identity.server_url, resolved_url
+    );
+    identity.server_url = resolved_url;
+  }
 
   eprintln!(
     "[mmcai_rs] Logging in as {} to {}",

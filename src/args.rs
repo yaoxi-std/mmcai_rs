@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 
 /// Parsed wrapper command-line arguments.
 ///
@@ -34,36 +34,63 @@ pub fn parse_wrapper_args(args: &[String]) -> Result<WrapperArgs> {
   })
 }
 
-/// Parse `<username>@<server-url>` into its components.
+/// Parse `<username>@<server>` into its components.
 ///
-/// The server URL must start with `http://` or `https://`.
-/// The split happens at the last `@http://` or `@https://` boundary,
-/// so usernames containing `@` (e.g. email addresses) are supported.
+/// Supported formats:
+///   - `player@https://skin.example.com/api/yggdrasil` — explicit URL
+///   - `player@http://localhost:8080` — explicit URL with http
+///   - `player@littleskin.cn` — bare domain (https:// is prepended automatically)
+///
+/// The split prefers an explicit scheme boundary (`@https://` or `@http://`).
+/// If none is found, the last `@` is used and `https://` is prepended to the
+/// server part. This means email-style usernames work when combined with
+/// a bare domain: `user@example.com@littleskin.cn`.
 pub fn parse_user_identity(raw_username: &str) -> Result<UserIdentity> {
-  let separator_pos = raw_username
+  // 1. Try explicit scheme: last @https:// or @http://
+  if let Some(pos) = raw_username
     .rfind("@https://")
     .or_else(|| raw_username.rfind("@http://"))
-    .with_context(|| {
-      format!(
-        "Invalid username format '{}': expected <username>@<server-url>",
+  {
+    let username = &raw_username[..pos];
+    let server_url = &raw_username[pos + 1..];
+    if username.is_empty() {
+      bail!(
+        "Username part is empty in '{}': expected <username>@<server>",
         raw_username
-      )
-    })?;
-
-  let username = &raw_username[..separator_pos];
-  let server_url = &raw_username[separator_pos + 1..];
-
-  if username.is_empty() {
-    bail!(
-      "Username part is empty in '{}': expected <username>@<server-url>",
-      raw_username
-    );
+      );
+    }
+    return Ok(UserIdentity {
+      username: username.to_string(),
+      server_url: server_url.to_string(),
+    });
   }
 
-  Ok(UserIdentity {
-    username: username.to_string(),
-    server_url: server_url.to_string(),
-  })
+  // 2. Bare domain: split on last '@', prepend https://
+  if let Some(pos) = raw_username.rfind('@') {
+    let username = &raw_username[..pos];
+    let server = &raw_username[pos + 1..];
+    if username.is_empty() {
+      bail!(
+        "Username part is empty in '{}': expected <username>@<server>",
+        raw_username
+      );
+    }
+    if server.is_empty() {
+      bail!(
+        "Server part is empty in '{}': expected <username>@<server>",
+        raw_username
+      );
+    }
+    return Ok(UserIdentity {
+      username: username.to_string(),
+      server_url: format!("https://{}", server),
+    });
+  }
+
+  bail!(
+    "Invalid username format '{}': expected <username>@<server>",
+    raw_username
+  )
 }
 
 #[cfg(test)]
@@ -118,7 +145,28 @@ mod tests {
   }
 
   #[test]
-  fn test_parse_user_identity_no_server_url() {
+  fn test_parse_user_identity_bare_domain() {
+    let id = parse_user_identity("player@littleskin.cn").unwrap();
+    assert_eq!(id.username, "player");
+    assert_eq!(id.server_url, "https://littleskin.cn");
+  }
+
+  #[test]
+  fn test_parse_user_identity_bare_domain_with_port() {
+    let id = parse_user_identity("player@localhost:8080").unwrap();
+    assert_eq!(id.username, "player");
+    assert_eq!(id.server_url, "https://localhost:8080");
+  }
+
+  #[test]
+  fn test_parse_user_identity_email_at_bare_domain() {
+    let id = parse_user_identity("user@example.com@littleskin.cn").unwrap();
+    assert_eq!(id.username, "user@example.com");
+    assert_eq!(id.server_url, "https://littleskin.cn");
+  }
+
+  #[test]
+  fn test_parse_user_identity_no_at() {
     assert!(parse_user_identity("player").is_err());
   }
 
@@ -128,7 +176,21 @@ mod tests {
   }
 
   #[test]
-  fn test_parse_user_identity_no_scheme() {
-    assert!(parse_user_identity("player@example.com").is_err());
+  fn test_parse_user_identity_empty_username_bare() {
+    assert!(parse_user_identity("@littleskin.cn").is_err());
+  }
+
+  #[test]
+  fn test_parse_user_identity_empty_server() {
+    assert!(parse_user_identity("player@").is_err());
+  }
+
+  #[test]
+  fn test_parse_user_identity_explicit_scheme_preferred() {
+    // When both bare @ and @https:// exist, the explicit scheme wins
+    let id =
+      parse_user_identity("user@example.com@https://skin.example.com/api/yggdrasil").unwrap();
+    assert_eq!(id.username, "user@example.com");
+    assert_eq!(id.server_url, "https://skin.example.com/api/yggdrasil");
   }
 }
